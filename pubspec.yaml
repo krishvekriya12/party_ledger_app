@@ -1,0 +1,35 @@
+name: party_ledger_app
+description: "Party & Karigar Ledger App - Billing, Payment and Advance Tracking"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.6
+
+  # Local database
+  sqflite: ^2.3.0
+  path: ^1.8.3
+
+  # File storage / backup
+  path_provider: ^2.1.1
+  share_plus: ^7.2.1
+
+  # Photo capture (camera + gallery)
+  image_picker: ^1.0.7
+
+  # Date formatting
+  intl: ^0.18.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
