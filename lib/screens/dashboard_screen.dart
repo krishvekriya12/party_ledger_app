@@ -118,7 +118,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _statCard(String label, double value, Color color, IconData icon) {
     return Card(
-      color: color.withOpacity(0.08),
+      color: color.withValues(alpha: 0.08),
       child: Padding(
         padding: const EdgeInsets.all(14.0),
         child: Column(

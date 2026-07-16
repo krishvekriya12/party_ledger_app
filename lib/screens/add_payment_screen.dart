@@ -97,7 +97,9 @@ class _AddPaymentScreenState extends State<AddPaymentScreen> {
                     child: RadioListTile<PaymentMode>(
                       title: const Text('Cash'),
                       value: PaymentMode.cash,
+                      // ignore: deprecated_member_use
                       groupValue: _mode,
+                      // ignore: deprecated_member_use
                       onChanged: (v) => setState(() => _mode = v!),
                     ),
                   ),
@@ -105,7 +107,9 @@ class _AddPaymentScreenState extends State<AddPaymentScreen> {
                     child: RadioListTile<PaymentMode>(
                       title: const Text('Cheque'),
                       value: PaymentMode.cheque,
+                      // ignore: deprecated_member_use
                       groupValue: _mode,
+                      // ignore: deprecated_member_use
                       onChanged: (v) => setState(() => _mode = v!),
                     ),
                   ),
