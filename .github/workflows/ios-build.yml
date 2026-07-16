@@ -1,4 +1,4 @@
-﻿name: Build iOS IPA
+﻿name: Build iOS Simulator App
 on:
   push:
     branches: [ master ]
@@ -12,10 +12,14 @@ jobs:
         with:
           channel: 'stable'
       - run: flutter pub get
-      - name: Build IPA without signing
-        run: flutter build ipa --no-codesign
+      - name: Build for iOS Simulator
+        run: flutter build ios --simulator
+      - name: Zip the app
+        run: |
+          cd build/ios/iphonesimulator
+          zip -r Runner.zip Runner.app
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ios-build
-          path: build/ios/archive/Runner.xcarchive
+          name: ios-simulator-build
+          path: build/ios/iphonesimulator/Runner.zip
