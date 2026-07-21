@@ -9,6 +9,9 @@ import '../models/karigar_advance.dart';
 import '../models/partner.dart';
 import '../models/partner_contribution.dart';
 import '../models/partner_expense.dart';
+import '../models/partner_advance.dart';
+import '../models/online_purchase.dart';
+import '../models/online_sale_payment.dart';
 
 class DBHelper {
   static final DBHelper instance = DBHelper._internal();
@@ -28,7 +31,7 @@ class DBHelper {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 6,
       onCreate: _createDB,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 3) {
@@ -42,6 +45,47 @@ class DBHelper {
           await db.execute('DROP TABLE IF EXISTS partner_contribution');
           await db.execute('DROP TABLE IF EXISTS partner_expense');
           await _createDB(db, newVersion);
+        }
+        if (oldVersion < 4) {
+          // Add online module tables (safe — does not drop existing data)
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS online_purchases (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              party_name TEXT NOT NULL,
+              amount REAL NOT NULL,
+              purchase_date TEXT NOT NULL,
+              note TEXT
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS online_sale_payments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              platform TEXT NOT NULL,
+              partner_id INTEGER NOT NULL,
+              amount REAL NOT NULL,
+              payment_date TEXT NOT NULL,
+              note TEXT,
+              FOREIGN KEY (partner_id) REFERENCES partners (id) ON DELETE CASCADE
+            )
+          ''');
+        }
+        if (oldVersion < 5) {
+          // Add pis column to bills (safe — existing rows default to 1)
+          await db.execute(
+              'ALTER TABLE bills ADD COLUMN pis REAL DEFAULT 1');
+        }
+        if (oldVersion < 6) {
+          // Add partner_advance table
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS partner_advance (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              partner_id INTEGER NOT NULL,
+              amount REAL NOT NULL,
+              advance_date TEXT NOT NULL,
+              note TEXT,
+              FOREIGN KEY (partner_id) REFERENCES partners (id) ON DELETE CASCADE
+            )
+          ''');
         }
       },
     );
@@ -63,6 +107,7 @@ class DBHelper {
         party_id INTEGER NOT NULL,
         design_no TEXT NOT NULL,
         color TEXT NOT NULL,
+        pis REAL NOT NULL DEFAULT 1,
         rate REAL NOT NULL,
         total REAL NOT NULL,
         bill_date TEXT NOT NULL,
@@ -141,6 +186,39 @@ class DBHelper {
         amount REAL NOT NULL,
         description TEXT NOT NULL,
         expense_date TEXT NOT NULL,
+        FOREIGN KEY (partner_id) REFERENCES partners (id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE online_purchases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        party_name TEXT NOT NULL,
+        amount REAL NOT NULL,
+        purchase_date TEXT NOT NULL,
+        note TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE online_sale_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platform TEXT NOT NULL,
+        partner_id INTEGER NOT NULL,
+        amount REAL NOT NULL,
+        payment_date TEXT NOT NULL,
+        note TEXT,
+        FOREIGN KEY (partner_id) REFERENCES partners (id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE partner_advance (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        partner_id INTEGER NOT NULL,
+        amount REAL NOT NULL,
+        advance_date TEXT NOT NULL,
+        note TEXT,
         FOREIGN KEY (partner_id) REFERENCES partners (id) ON DELETE CASCADE
       )
     ''');
@@ -426,11 +504,38 @@ class DBHelper {
     return (result.first['sum'] as double?) ?? 0.0;
   }
 
-  // Net = Total Contribution - Total Expense (kitna balance partner ka business me bacha hai)
+  // ---------- PARTNER ADVANCE CRUD ----------
+  Future<int> insertPartnerAdvance(PartnerAdvance advance) async {
+    final db = await database;
+    return await db.insert('partner_advance', advance.toMap());
+  }
+
+  Future<List<PartnerAdvance>> getAdvancesForPartner(int partnerId) async {
+    final db = await database;
+    final maps = await db.query(
+      'partner_advance',
+      where: 'partner_id = ?',
+      whereArgs: [partnerId],
+      orderBy: 'advance_date DESC',
+    );
+    return maps.map((m) => PartnerAdvance.fromMap(m)).toList();
+  }
+
+  Future<double> getTotalAdvanceForPartner(int partnerId) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT SUM(amount) as sum FROM partner_advance WHERE partner_id = ?',
+      [partnerId],
+    );
+    return (result.first['sum'] as double?) ?? 0.0;
+  }
+
+  // Net = Total Contribution - Total Expense - Total Advance (kitna balance partner ka business me bacha hai)
   Future<double> getPartnerNetBalance(int partnerId) async {
     final totalContribution = await getTotalContribution(partnerId);
     final totalExpense = await getTotalExpense(partnerId);
-    return totalContribution - totalExpense;
+    final totalAdvance = await getTotalAdvanceForPartner(partnerId);
+    return totalContribution - totalExpense - totalAdvance;
   }
 
   // Grand total across ALL partners
@@ -439,19 +544,23 @@ class DBHelper {
     final contributionResult =
         await db.rawQuery('SELECT SUM(amount) as sum FROM partner_contribution');
     final expenseResult = await db.rawQuery('SELECT SUM(amount) as sum FROM partner_expense');
+    final advanceResult = await db.rawQuery('SELECT SUM(amount) as sum FROM partner_advance');
     final totalContribution = (contributionResult.first['sum'] as double?) ?? 0.0;
     final totalExpense = (expenseResult.first['sum'] as double?) ?? 0.0;
+    final totalAdvance = (advanceResult.first['sum'] as double?) ?? 0.0;
     return {
       'totalContribution': totalContribution,
       'totalExpense': totalExpense,
-      'netBalance': totalContribution - totalExpense,
+      'totalAdvance': totalAdvance,
+      'netBalance': totalContribution - totalExpense - totalAdvance,
     };
   }
 
-  // Combined chronological history (contribution + expense) for a partner - for the "who said how much and when spent what" record
+  // Combined chronological history (contribution + expense + advance) for a partner
   Future<List<Map<String, dynamic>>> getPartnerFullHistory(int partnerId) async {
     final contributions = await getContributionsForPartner(partnerId);
     final expenses = await getExpensesForPartner(partnerId);
+    final advances = await getAdvancesForPartner(partnerId);
 
     final history = <Map<String, dynamic>>[];
     for (final c in contributions) {
@@ -468,6 +577,14 @@ class DBHelper {
         'amount': e.amount,
         'date': e.expenseDate,
         'label': e.description,
+      });
+    }
+    for (final a in advances) {
+      history.add({
+        'type': 'advance',
+        'amount': a.amount,
+        'date': a.advanceDate,
+        'label': a.note ?? 'Advance',
       });
     }
     history.sort((a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime));
@@ -513,7 +630,7 @@ class DBHelper {
     return (result.first['sum'] as double?) ?? 0.0;
   }
 
-  // 4. Partner ledger - kisko kitna paisa dala (reuse getPartnerGrandTotal + per-partner list)
+  // 4. Partner ledger
   Future<List<Map<String, dynamic>>> getPartnerLedgerSummary() async {
     final partners = await getAllPartners();
     final list = <Map<String, dynamic>>[];
@@ -521,11 +638,13 @@ class DBHelper {
       if (p.id == null) continue;
       final totalGiven = await getTotalContribution(p.id!);
       final totalSpent = await getTotalExpense(p.id!);
+      final totalAdvance = await getTotalAdvanceForPartner(p.id!);
       list.add({
         'partner': p,
         'totalGiven': totalGiven,
         'totalSpent': totalSpent,
-        'net': totalGiven - totalSpent,
+        'totalAdvance': totalAdvance,
+        'net': totalGiven - totalSpent - totalAdvance,
       });
     }
     return list;
@@ -559,25 +678,30 @@ class DBHelper {
       SELECT strftime('%Y-%m', expense_date) as month, SUM(amount) as total
       FROM partner_expense GROUP BY month
     ''');
+    final partnerAdvanceRows = await db.rawQuery('''
+      SELECT strftime('%Y-%m', advance_date) as month, SUM(amount) as total
+      FROM partner_advance GROUP BY month
+    ''');
 
     final Map<String, Map<String, double>> monthly = {};
 
     void addRows(List<Map<String, Object?>> rows, String key) {
       for (final r in rows) {
-        final month = r['month'] as String?;
-        if (month == null) continue;
-        final value = (r['total'] as double?) ?? 0.0;
-        monthly.putIfAbsent(
-            month,
-            () => {
-                  'bill': 0,
-                  'payment': 0,
-                  'karigarWork': 0,
-                  'karigarAdvance': 0,
-                  'partnerContribution': 0,
-                  'partnerExpense': 0,
-                });
-        monthly[month]![key] = value;
+         final month = r['month'] as String?;
+         if (month == null) continue;
+         final value = (r['total'] as double?) ?? 0.0;
+         monthly.putIfAbsent(
+             month,
+             () => {
+                   'bill': 0,
+                   'payment': 0,
+                   'karigarWork': 0,
+                   'karigarAdvance': 0,
+                   'partnerContribution': 0,
+                   'partnerExpense': 0,
+                   'partnerAdvance': 0,
+                 });
+         monthly[month]![key] = value;
       }
     }
 
@@ -587,6 +711,7 @@ class DBHelper {
     addRows(advanceRows, 'karigarAdvance');
     addRows(contributionRows, 'partnerContribution');
     addRows(expenseRows, 'partnerExpense');
+    addRows(partnerAdvanceRows, 'partnerAdvance');
 
     final months = monthly.keys.toList()..sort((a, b) => b.compareTo(a));
     return months.map((m) => {'month': m, ...monthly[m]!}).toList();
@@ -640,5 +765,101 @@ class DBHelper {
     // Overdue first, then soonest due date
     report.sort((a, b) => (a['daysRemaining'] as int).compareTo(b['daysRemaining'] as int));
     return report;
+  }
+  // =========================================================
+  // -------------- ONLINE MODULE CRUD -----------------
+  // =========================================================
+
+  // ---------- ONLINE PURCHASE CRUD ----------
+  Future<int> insertOnlinePurchase(OnlinePurchase purchase) async {
+    final db = await database;
+    return await db.insert('online_purchases', purchase.toMap());
+  }
+
+  Future<List<OnlinePurchase>> getAllOnlinePurchases() async {
+    final db = await database;
+    final maps = await db.query('online_purchases', orderBy: 'purchase_date DESC');
+    return maps.map((m) => OnlinePurchase.fromMap(m)).toList();
+  }
+
+  Future<int> deleteOnlinePurchase(int id) async {
+    final db = await database;
+    return await db.delete('online_purchases', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<double> getTotalOnlinePurchaseAmount() async {
+    final db = await database;
+    final result = await db.rawQuery('SELECT SUM(amount) as sum FROM online_purchases');
+    return (result.first['sum'] as double?) ?? 0.0;
+  }
+
+  // ---------- ONLINE SALE PAYMENT CRUD ----------
+  Future<int> insertOnlineSalePayment(OnlineSalePayment payment) async {
+    final db = await database;
+    return await db.insert('online_sale_payments', payment.toMap());
+  }
+
+  /// All payments for a specific platform (flipkart / meesho)
+  Future<List<OnlineSalePayment>> getSalePaymentsForPlatform(String platform) async {
+    final db = await database;
+    final maps = await db.query(
+      'online_sale_payments',
+      where: 'platform = ?',
+      whereArgs: [platform],
+      orderBy: 'payment_date DESC',
+    );
+    return maps.map((m) => OnlineSalePayment.fromMap(m)).toList();
+  }
+
+  /// All payments for a specific partner + platform
+  Future<List<OnlineSalePayment>> getSalePaymentsForPartner(
+      int partnerId, String platform) async {
+    final db = await database;
+    final maps = await db.query(
+      'online_sale_payments',
+      where: 'partner_id = ? AND platform = ?',
+      whereArgs: [partnerId, platform],
+      orderBy: 'payment_date DESC',
+    );
+    return maps.map((m) => OnlineSalePayment.fromMap(m)).toList();
+  }
+
+  Future<int> deleteOnlineSalePayment(int id) async {
+    final db = await database;
+    return await db.delete('online_sale_payments', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<double> getTotalSalePaymentForPlatform(String platform) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT SUM(amount) as sum FROM online_sale_payments WHERE platform = ?',
+      [platform],
+    );
+    return (result.first['sum'] as double?) ?? 0.0;
+  }
+
+  Future<double> getTotalSalePaymentForPartner(int partnerId, String platform) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT SUM(amount) as sum FROM online_sale_payments WHERE partner_id = ? AND platform = ?',
+      [partnerId, platform],
+    );
+    return (result.first['sum'] as double?) ?? 0.0;
+  }
+
+  /// Summary per partner for a given platform (for dashboard tabs)
+  Future<List<Map<String, dynamic>>> getPartnerSaleSummaryForPlatform(
+      String platform) async {
+    final partners = await getAllPartners();
+    final list = <Map<String, dynamic>>[];
+    for (final p in partners) {
+      if (p.id == null) continue;
+      final total = await getTotalSalePaymentForPartner(p.id!, platform);
+      if (total > 0) {
+        list.add({'partner': p, 'total': total});
+      }
+    }
+    list.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
+    return list;
   }
 }

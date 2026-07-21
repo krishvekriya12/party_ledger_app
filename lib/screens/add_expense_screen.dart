@@ -19,90 +19,97 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   bool _saving = false;
 
   Future<void> _pickDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-    );
+    final picked = await showDatePicker(context: context, initialDate: _selectedDate, firstDate: DateTime(2020), lastDate: DateTime(2100));
     if (picked != null) setState(() => _selectedDate = picked);
   }
 
   Future<void> _saveExpense() async {
     if (!_formKey.currentState!.validate()) return;
     if (widget.partner.id == null) return;
-
     setState(() => _saving = true);
-
     final expense = PartnerExpense(
       partnerId: widget.partner.id!,
       amount: double.parse(_amountController.text),
       description: _descriptionController.text.trim(),
       expenseDate: _selectedDate,
     );
-
     try {
       await DBHelper.instance.insertPartnerExpense(expense);
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
-    } finally {
-      setState(() => _saving = false);
-    }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    } finally { setState(() => _saving = false); }
   }
 
   @override
-  void dispose() {
-    _amountController.dispose();
-    _descriptionController.dispose();
-    super.dispose();
-  }
+  void dispose() { _amountController.dispose(); _descriptionController.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
+    const accent = Color(0xFFCC3300);
+    final dateStr = '${_selectedDate.day.toString().padLeft(2, '0')}/${_selectedDate.month.toString().padLeft(2, '0')}/${_selectedDate.year}';
+
     return Scaffold(
-      appBar: AppBar(title: Text('Expense - ${widget.partner.name}')),
+      backgroundColor: const Color(0xFFF5F4F0),
+      appBar: AppBar(
+        title: Text('Expense — ${widget.partner.name}'),
+        backgroundColor: Colors.white, foregroundColor: const Color(0xFF1C1C1E),
+        elevation: 0, shape: const Border(bottom: BorderSide(color: Color(0xFFE8E8E4))),
+      ),
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: Form(
           key: _formKey,
           child: ListView(
             children: [
               TextFormField(
                 controller: _descriptionController,
-                decoration: const InputDecoration(labelText: 'Kya kharcha kiya (Description)'),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Description is required' : null,
+                decoration: const InputDecoration(labelText: 'Expense Description', prefixIcon: Icon(Icons.notes, size: 18)),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Description is required' : null,
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               TextFormField(
-                controller: _amountController,
-                decoration: const InputDecoration(labelText: 'Amount'),
-                keyboardType: TextInputType.number,
+                controller: _amountController, keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Amount (₹)', prefixIcon: Icon(Icons.currency_rupee, size: 18)),
                 validator: (v) {
                   if (v == null || v.trim().isEmpty) return 'Amount is required';
-                  if (double.tryParse(v) == null) return 'Enter a valid number';
+                  if (double.tryParse(v) == null) return 'Enter valid number';
                   return null;
                 },
               ),
-              const SizedBox(height: 16),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Date'),
-                subtitle: Text('${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}'),
-                trailing: const Icon(Icons.calendar_today),
+              const SizedBox(height: 12),
+              GestureDetector(
                 onTap: _pickDate,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFE0DED8))),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.calendar_today_outlined, size: 18, color: Color(0xFF888888)),
+                      const SizedBox(width: 10),
+                      const Text('Date', style: TextStyle(color: Color(0xFF888888), fontSize: 13)),
+                      const Spacer(),
+                      Text(dateStr, style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF1C1C1E))),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF888888)),
+                    ],
+                  ),
+                ),
               ),
               const SizedBox(height: 32),
-              ElevatedButton(
-                onPressed: _saving ? null : _saveExpense,
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                child: _saving
-                    ? const SizedBox(
-                        height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Save Expense'),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _saving ? null : _saveExpense,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: accent, foregroundColor: Colors.white, elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: _saving
+                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Save Expense', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                ),
               ),
             ],
           ),

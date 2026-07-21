@@ -15,13 +15,26 @@ class _AddBillScreenState extends State<AddBillScreen> {
   final _formKey = GlobalKey<FormState>();
   final _designNoController = TextEditingController();
   final _colorController = TextEditingController();
+  final _pisController = TextEditingController();
   final _rateController = TextEditingController();
+  DateTime _selectedDate = DateTime.now();
   double _total = 0.0;
   bool _saving = false;
 
   void _calculateTotal() {
+    final pis = double.tryParse(_pisController.text) ?? 0;
     final rate = double.tryParse(_rateController.text) ?? 0;
-    setState(() => _total = rate);
+    setState(() => _total = pis * rate);
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+    );
+    if (picked != null) setState(() => _selectedDate = picked);
   }
 
   Future<void> _saveBill() async {
@@ -34,8 +47,10 @@ class _AddBillScreenState extends State<AddBillScreen> {
       partyId: widget.party.id!,
       designNo: _designNoController.text.trim(),
       color: _colorController.text.trim(),
+      pis: double.parse(_pisController.text),
       rate: double.parse(_rateController.text),
       total: _total,
+      billDate: _selectedDate,
     );
 
     try {
@@ -56,76 +71,204 @@ class _AddBillScreenState extends State<AddBillScreen> {
   void dispose() {
     _designNoController.dispose();
     _colorController.dispose();
+    _pisController.dispose();
     _rateController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    const accent = Color(0xFF1A6DFF);
+    final dateStr =
+        '${_selectedDate.day.toString().padLeft(2, '0')}/${_selectedDate.month.toString().padLeft(2, '0')}/${_selectedDate.year}';
+
     return Scaffold(
-      appBar: AppBar(title: Text('Bill Entry - ${widget.party.name}')),
+      backgroundColor: const Color(0xFFF5F4F0),
+      appBar: AppBar(
+        title: Text('Bill — ${widget.party.name}'),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1C1C1E),
+        elevation: 0,
+        shape: const Border(bottom: BorderSide(color: Color(0xFFE8E8E4))),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
           key: _formKey,
           child: ListView(
             children: [
-              TextFormField(
+              // Design No
+              _field(
                 controller: _designNoController,
-                decoration: const InputDecoration(labelText: 'Design No'),
+                label: 'Design No',
+                icon: Icons.tag,
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Design No is required' : null,
               ),
-              const SizedBox(height: 16),
-              TextFormField(
+              const SizedBox(height: 12),
+              // Color
+              _field(
                 controller: _colorController,
-                decoration: const InputDecoration(labelText: 'Color'),
+                label: 'Color',
+                icon: Icons.palette_outlined,
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Color is required' : null,
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _rateController,
-                decoration: const InputDecoration(labelText: 'Rate / Amount'),
-                keyboardType: TextInputType.number,
-                onChanged: (_) => _calculateTotal(),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Rate is required';
-                  if (double.tryParse(v) == null) return 'Enter a valid number';
-                  return null;
-                },
+              const SizedBox(height: 12),
+              // Pis + Rate row
+              Row(
+                children: [
+                  Expanded(
+                    child: _field(
+                      controller: _pisController,
+                      label: 'Pieces',
+                      icon: Icons.layers_outlined,
+                      keyboard: TextInputType.number,
+                      onChanged: (_) => _calculateTotal(),
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return 'Pieces is required';
+                        if (double.tryParse(v) == null) return 'Enter valid number';
+                        return null;
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _field(
+                      controller: _rateController,
+                      label: 'Rate (₹)',
+                      icon: Icons.currency_rupee,
+                      keyboard: TextInputType.number,
+                      onChanged: (_) => _calculateTotal(),
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return 'Rate is required';
+                        if (double.tryParse(v) == null) return 'Enter valid number';
+                        return null;
+                      },
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 24),
-              Card(
-                color: Colors.green.shade50,
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
+              const SizedBox(height: 16),
+              // Total preview
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: accent.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: accent.withOpacity(0.25)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Total Amount',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600, color: Color(0xFF444444)),
+                    ),
+                    Text(
+                      '₹${_total.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: accent),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Date picker
+              GestureDetector(
+                onTap: _pickDate,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFE0DED8)),
+                  ),
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Total', style: TextStyle(fontWeight: FontWeight.bold)),
-                      Text(
-                        '₹${_total.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 18, color: Colors.green),
-                      ),
+                      const Icon(Icons.calendar_today_outlined,
+                          size: 18, color: Color(0xFF888888)),
+                      const SizedBox(width: 10),
+                      const Text('Bill Date',
+                          style: TextStyle(color: Color(0xFF888888), fontSize: 13)),
+                      const Spacer(),
+                      Text(dateStr,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF1C1C1E))),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.edit_outlined,
+                          size: 16, color: Color(0xFF888888)),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: 32),
-              ElevatedButton(
-                onPressed: _saving ? null : _saveBill,
-                child: _saving
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Save Bill'),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _saving ? null : _saveBill,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: accent,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: _saving
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('Save Bill',
+                          style: TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w600)),
+                ),
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _field({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    TextInputType keyboard = TextInputType.text,
+    void Function(String)? onChanged,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboard,
+      onChanged: onChanged,
+      validator: validator,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon, size: 18, color: const Color(0xFF888888)),
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: Color(0xFFE0DED8)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: Color(0xFFE0DED8)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: Color(0xFF1A6DFF), width: 1.5),
         ),
       ),
     );
