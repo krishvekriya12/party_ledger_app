@@ -12,6 +12,7 @@ import '../models/partner_expense.dart';
 import '../models/partner_advance.dart';
 import '../models/online_purchase.dart';
 import '../models/online_sale_payment.dart';
+import '../models/challan.dart';
 
 class DBHelper {
   static final DBHelper instance = DBHelper._internal();
@@ -31,7 +32,7 @@ class DBHelper {
 
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _createDB,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 3) {
@@ -87,9 +88,40 @@ class DBHelper {
             )
           ''');
         }
+        if (oldVersion < 7) {
+          // Add challans and challan_items tables
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS challans (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              bill_no TEXT NOT NULL,
+              challan_date TEXT NOT NULL,
+              from_name TEXT NOT NULL,
+              party_name TEXT NOT NULL,
+              gstin TEXT,
+              total_pcs INTEGER NOT NULL,
+              total_amount REAL NOT NULL,
+              prepared_by TEXT,
+              note TEXT,
+              created_at TEXT NOT NULL
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS challan_items (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              challan_id INTEGER NOT NULL,
+              particular TEXT NOT NULL,
+              sizes_json TEXT NOT NULL,
+              total_pcs INTEGER NOT NULL,
+              rate REAL NOT NULL,
+              amount REAL NOT NULL,
+              FOREIGN KEY (challan_id) REFERENCES challans (id) ON DELETE CASCADE
+            )
+          ''');
+        }
       },
     );
   }
+
 
   Future<void> _createDB(Database db, int version) async {
     await db.execute('''
@@ -220,6 +252,35 @@ class DBHelper {
         advance_date TEXT NOT NULL,
         note TEXT,
         FOREIGN KEY (partner_id) REFERENCES partners (id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE challans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bill_no TEXT NOT NULL,
+        challan_date TEXT NOT NULL,
+        from_name TEXT NOT NULL,
+        party_name TEXT NOT NULL,
+        gstin TEXT,
+        total_pcs INTEGER NOT NULL,
+        total_amount REAL NOT NULL,
+        prepared_by TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE challan_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        challan_id INTEGER NOT NULL,
+        particular TEXT NOT NULL,
+        sizes_json TEXT NOT NULL,
+        total_pcs INTEGER NOT NULL,
+        rate REAL NOT NULL,
+        amount REAL NOT NULL,
+        FOREIGN KEY (challan_id) REFERENCES challans (id) ON DELETE CASCADE
       )
     ''');
   }
@@ -861,5 +922,96 @@ class DBHelper {
     }
     list.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
     return list;
+  }
+
+
+  // ---------- CHALLAN CRUD ----------
+  Future<int> insertChallan(Challan challan) async {
+    final db = await database;
+    return await db.transaction((txn) async {
+      final challanId = await txn.insert('challans', challan.toMap());
+      for (final item in challan.items) {
+        final itemMap = item.toMap();
+        itemMap['challan_id'] = challanId;
+        await txn.insert('challan_items', itemMap);
+      }
+      return challanId;
+    });
+  }
+
+  Future<List<Challan>> getAllChallans({String? query}) async {
+    final db = await database;
+    String? whereClause;
+    List<dynamic>? whereArgs;
+    if (query != null && query.trim().isNotEmpty) {
+      whereClause = 'party_name LIKE ? OR bill_no LIKE ?';
+      whereArgs = ['%${query.trim()}%', '%${query.trim()}%'];
+    }
+    final maps = await db.query(
+      'challans',
+      where: whereClause,
+      whereArgs: whereArgs,
+      orderBy: 'id DESC',
+    );
+
+    List<Challan> result = [];
+    for (final map in maps) {
+      final challanId = map['id'] as int;
+      final itemMaps = await db.query(
+        'challan_items',
+        where: 'challan_id = ?',
+        whereArgs: [challanId],
+        orderBy: 'id ASC',
+      );
+      final items = itemMaps.map((m) => ChallanItem.fromMap(m)).toList();
+      result.add(Challan.fromMap(map, items: items));
+    }
+    return result;
+  }
+
+  Future<Challan?> getChallanById(int id) async {
+    final db = await database;
+    final maps = await db.query('challans', where: 'id = ?', whereArgs: [id]);
+    if (maps.isEmpty) return null;
+
+    final itemMaps = await db.query(
+      'challan_items',
+      where: 'challan_id = ?',
+      whereArgs: [id],
+      orderBy: 'id ASC',
+    );
+    final items = itemMaps.map((m) => ChallanItem.fromMap(m)).toList();
+    return Challan.fromMap(maps.first, items: items);
+  }
+
+  Future<void> updateChallan(Challan challan) async {
+    if (challan.id == null) return;
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.update(
+        'challans',
+        challan.toMap(),
+        where: 'id = ?',
+        whereArgs: [challan.id],
+      );
+      await txn.delete('challan_items', where: 'challan_id = ?', whereArgs: [challan.id]);
+      for (final item in challan.items) {
+        final itemMap = item.toMap();
+        itemMap['challan_id'] = challan.id;
+        await txn.insert('challan_items', itemMap);
+      }
+    });
+  }
+
+  Future<int> deleteChallan(int id) async {
+    final db = await database;
+    return await db.delete('challans', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<String> getNextBillNo() async {
+    final db = await database;
+    final result = await db.rawQuery('SELECT MAX(id) as max_id FROM challans');
+    final maxId = (result.first['max_id'] as int?) ?? 0;
+    return '${maxId + 1}';
   }
 }

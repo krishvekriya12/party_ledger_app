@@ -4,6 +4,7 @@ import 'karigar_list_screen.dart';
 import 'partner_list_screen.dart';
 import 'dashboard_screen.dart';
 import 'online_dashboard_screen.dart';
+import 'challan_list_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -56,6 +57,15 @@ class HomeScreen extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             _ModuleCard(
+              title: 'Challan',
+              subtitle: 'Bill of Supply, Dynamic Sizes, PDF & Share',
+              icon: Icons.receipt_long_outlined,
+              accent: const Color(0xFFE91E63),
+              onTap: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const ChallanListScreen())),
+            ),
+            const SizedBox(height: 12),
+            _ModuleCard(
               title: 'Workers',
               subtitle: 'Work, Advance, Net Payable, PDF',
               icon: Icons.handyman_outlined,
@@ -89,6 +99,7 @@ class HomeScreen extends StatelessWidget {
       ),
     );
   }
+
 
   String _todayStr() {
     final now = DateTime.now();
