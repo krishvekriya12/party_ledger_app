@@ -1,0 +1,1 @@
+// Legacy file - content moved to party_list_screen.dart
